@@ -19,6 +19,9 @@ def get_stock_price(ticker: str) -> str:
         prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
 
         if current_price is None or prev_close is None:
+            market = info.get("market", "")
+            if market and market != "us_market":
+                return f"'{ticker}'의 주가 데이터를 가져올 수 없습니다. 해외 주식(미국 외)은 일부 데이터가 제공되지 않을 수 있습니다. 미국 주식 티커(예: AAPL, TSLA)를 이용해주세요."
             return f"'{ticker}' 티커의 주가 데이터를 가져올 수 없습니다. 올바른 티커 심볼인지 확인해주세요."
 
         change_pct = ((current_price - prev_close) / prev_close) * 100
@@ -41,6 +44,11 @@ def get_company_info(ticker: str) -> str:
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
+
+        # 미국 외 시장은 일부 데이터 미제공 안내
+        market = info.get("market", "")
+        if market and market != "us_market":
+            return f"'{ticker}'는 미국 외 시장 종목으로, 일부 재무 데이터가 제공되지 않을 수 있습니다. 미국 주식 티커(예: AAPL, TSLA)를 이용해주세요."
 
         market_cap = info.get("marketCap")
         if market_cap:

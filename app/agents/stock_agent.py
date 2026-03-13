@@ -11,6 +11,9 @@ from app.agents.prompts import system_prompt
 from app.agents.tools import get_company_info, get_recent_news, get_stock_price
 from app.core.config import settings
 
+# 모듈 레벨 싱글턴 — Agent 인스턴스가 여러 번 생성되어도 동일한 메모리를 공유
+_checkpointer = MemorySaver()
+
 
 @tool
 def ChatResponse(message_id: str, content: str, metadata: dict = {}) -> str:
@@ -84,8 +87,8 @@ class Agent:
         graph.add_edge("tools", "model")
         graph.add_edge("execute_chat_response", END)
 
-        return graph.compile(checkpointer=MemorySaver())
+        return graph.compile(checkpointer=_checkpointer)
 
-    async def astream(self, input_data: dict, config: dict = None, stream_mode: str = "updates"):
-        async for chunk in self.graph.astream(input_data, config=config, stream_mode=stream_mode):
+    async def astream(self, input_data: dict, config: dict = None):
+        async for chunk in self.graph.astream(input_data, config=config, stream_mode="updates"):
             yield chunk

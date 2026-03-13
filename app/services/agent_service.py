@@ -43,7 +43,6 @@ class AgentService:
             agent_stream = self.agent.astream(
                 {"messages": [HumanMessage(content=user_messages)]},
                 config={"configurable": {"thread_id": str(thread_id)}},
-                stream_mode="updates",
             )
 
             agent_iterator = agent_stream.__aiter__()
