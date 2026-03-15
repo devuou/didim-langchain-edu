@@ -8,16 +8,18 @@ FastAPI + LangGraph 기반의 주식 분석 특화 AI Agent 서버입니다.
 - **FastAPI** — API 서버
 - **LangChain / LangGraph** — ReAct 에이전트 및 대화 흐름 관리
 - **OpenAI GPT-4** — LLM
-- **yfinance** — 주식 데이터 조회
+- **yfinance** — 실시간 주식 데이터 조회
+- **Elasticsearch** — OHLCV 히스토리컬 데이터 저장 및 검색
 - **uv** — 패키지 관리
 
 ## 에이전트 기능
 
-| Tool | 설명 | 반환 예시 |
-|---|---|---|
-| `get_stock_price` | 현재 주가 및 전일 대비 등락률 | `AAPL 현재가: $260.83 \| 등락률: +0.37%` |
-| `get_company_info` | 시가총액, PER, 업종 | `AAPL \| 시가총액: 3.83조 달러 \| PER: 33.02 \| 업종: Technology` |
-| `get_recent_news` | 최근 뉴스 최대 3건 (제목 + 링크) | — |
+| Tool | 데이터 소스 | 설명 | 반환 예시 |
+|---|---|---|---|
+| `get_stock_price` | yfinance (실시간) | 현재 주가 및 전일 대비 등락률 | `AAPL 현재가: $260.83 \| 등락률: +0.37%` |
+| `get_company_info` | yfinance (실시간) | 시가총액, PER, 업종 | `AAPL \| 시가총액: 3.83조 달러 \| PER: 33.02 \| 업종: Technology` |
+| `get_recent_news` | yfinance (실시간) | 최근 뉴스 최대 3건 (제목 + 링크) | — |
+| `get_stock_history` | Elasticsearch | OHLCV 히스토리컬 데이터 조회 (지원 종목: AAPL, MSFT, TSLA, NVDA) | — |
 
 - 여러 tool을 조합한 복합 질문 처리 (예: "AAPL 주가랑 최근 뉴스 알려줘")
 - thread_id 기반 멀티턴 대화 (대화 이력 유지)
@@ -54,7 +56,15 @@ cp env.sample .env
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_MODEL=gpt-4o
+
+# Elasticsearch
+ES_URL=https://your-elasticsearch-host
+ES_USERNAME=elastic
+ES_PASSWORD=your_es_password
+ES_INDEX_PREFIX=dev
 ```
+
+서버 시작 시 Elasticsearch에 4개 종목(AAPL, MSFT, TSLA, NVDA)의 1년치 OHLCV 데이터가 자동으로 적재됩니다.
 
 ### 4. 서버 실행
 
@@ -99,9 +109,14 @@ data: {"step": "done", "message_id": "...", "role": "assistant", "content": "...
 agent/
 ├── app/
 │   ├── agents/
-│   │   ├── tools.py          # yfinance 기반 tool 3종
+│   │   ├── tools.py          # yfinance 기반 실시간 tool 3종
+│   │   ├── es_tools.py       # Elasticsearch 기반 히스토리컬 tool
 │   │   ├── stock_agent.py    # LangGraph ReAct 에이전트
 │   │   └── prompts.py        # 시스템 프롬프트
+│   ├── elasticsearch/
+│   │   ├── client.py         # ES 클라이언트 싱글턴
+│   │   ├── ingester.py       # yfinance → ES bulk upsert (앱 시작 시 실행)
+│   │   └── retriever.py      # ElasticsearchRetriever + document_mapper
 │   ├── api/routes/
 │   │   ├── chat.py           # 스트리밍 채팅 엔드포인트
 │   │   └── threads.py        # 대화 이력 엔드포인트
@@ -109,7 +124,7 @@ agent/
 │   │   └── config.py         # 환경 변수 설정
 │   ├── services/
 │   │   └── agent_service.py  # 에이전트 실행 및 스트리밍 처리
-│   └── main.py               # FastAPI 앱 진입점
+│   └── main.py               # FastAPI 앱 진입점 (lifespan으로 ES 적재)
 ├── docs/
 │   ├── spec.md               # API 명세
 │   └── daily-record/         # 개발 일지

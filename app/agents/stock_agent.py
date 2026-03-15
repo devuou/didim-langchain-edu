@@ -9,6 +9,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 
+from app.agents.es_tools import get_stock_history
 from app.agents.prompts import system_prompt
 from app.agents.tools import get_company_info, get_recent_news, get_stock_price
 
@@ -46,7 +47,7 @@ def create_stock_agent(model: ChatOpenAI, checkpointer: BaseCheckpointSaver[Any]
 
     agent = create_agent(
         model=model,
-        tools=[get_stock_price, get_company_info, get_recent_news],
+        tools=[get_stock_price, get_company_info, get_recent_news, get_stock_history],
         system_prompt=system_prompt,
         response_format=ToolStrategy(ChatResponse),
         checkpointer=checkpointer,

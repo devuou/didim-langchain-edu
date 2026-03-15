@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     OPENAI_MODEL: str
     
+    # Elasticsearch 설정
+    ES_URL: str = "http://localhost:9200"
+    ES_USERNAME: str | None = None
+    ES_PASSWORD: str | None = None
+    ES_INDEX_PREFIX: str = "dev"
+
     # 기본 설정 (추가 환경변수가 필요하면 여기에 추가하세요)
 
     # IMP: DeepAgents 라이브러리 실행 시 Graph 에이전트의 최대 재귀 호출 횟수(Recursion Limit) 설정

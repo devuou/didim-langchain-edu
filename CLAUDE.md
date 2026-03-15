@@ -33,6 +33,9 @@ Copy `env.sample` to `.env` and set:
 - `OPENAI_API_KEY` — required
 - `OPENAI_MODEL` — default `gpt-4o`
 - `DEEPAGENT_RECURSION_LIMIT` — max agent recursion, default `20`
+- `ES_URL` — Elasticsearch URL, default `http://localhost:9200`
+- `ES_USERNAME` / `ES_PASSWORD` — ES basic auth credentials
+- `ES_INDEX_PREFIX` — index name prefix to avoid conflicts on shared clusters, default `dev`
 
 ## Architecture
 
@@ -54,7 +57,8 @@ SSE steps: `model` (tool decision) → `tools` (tool results) → `done` (final 
 
 - **`app/api/routes/`** — FastAPI endpoints: `chat.py` (streaming SSE), `threads.py` (conversation history)
 - **`app/services/`** — Business logic: `agent_service.py` (LLM orchestration), `conversation_service.py` (in-memory history), `threads_service.py` (JSON data access)
-- **`app/agents/`** — Agent implementations: `dummy.py` (echo mock, used when no real agent is wired), `prompts.py` (system prompts)
+- **`app/agents/`** — Agent implementations: `stock_agent.py` (LangGraph ReAct agent), `tools.py` (yfinance real-time tools), `es_tools.py` (Elasticsearch historical tools), `prompts.py` (system prompts)
+- **`app/elasticsearch/`** — Elasticsearch integration: `client.py` (singleton client), `ingester.py` (yfinance → ES bulk upsert, runs on startup), `retriever.py` (ElasticsearchRetriever + document_mapper)
 - **`app/core/config.py`** — Pydantic-Settings config loaded from `.env` (nested via `__` delimiter)
 - **`app/data/`** — JSON-based persistence: `threads.json` (index), `threads/{thread_id}.json` (messages), `favorite_questions.json`
 
