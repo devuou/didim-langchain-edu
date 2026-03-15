@@ -13,26 +13,48 @@ from langgraph.errors import GraphRecursionError
 
 class AgentService:
     def __init__(self):
-        # IMP: LangChain을 통해 사용할 LLM(OpenAI) 객체 초기화 구현. 에이전트의 두뇌 역할을 합니다.
+        from langchain_openai import ChatOpenAI
+        from app.core.config import settings
+        from pydantic import SecretStr
+
+        # LLM 초기화
+        self.model = ChatOpenAI(
+            model=settings.OPENAI_MODEL,
+            api_key=SecretStr(settings.OPENAI_API_KEY),
+        )
+
+        # 대화 이력 저장소: process_query 첫 호출 시 초기화
+        self.checkpointer = None
         self.agent = None
         self.progress_queue: asyncio.Queue = asyncio.Queue()
+
+    async def _init_checkpointer(self):
+        """MemorySaver 초기화 (첫 호출 시 한 번만 실행)"""
+        if self.checkpointer is not None:
+            return
+        from langgraph.checkpoint.memory import MemorySaver
+        self.checkpointer = MemorySaver()
 
     def _create_agent(self, thread_id: uuid.UUID = None):
         """LangChain 에이전트 생성"""
         # IMP: DeepAgents 라이브러리를 사용하여 LangGraph 기반의 에이전트를 생성하는 구현.
         # LLM 모델, 사용할 도구(Tools), 시스템 프롬프트, 상태 저장소(Checkpointer), 그리고 응답 포맷(ToolStrategy)을 결합하여 워크플로우를 초기화합니다.
-        # Agent 생성 (MemorySaver 유지를 위해 최초 1회만 생성)
+        assert self.checkpointer is not None, "checkpointer가 초기화되지 않았습니다. _init_checkpointer를 먼저 호출하세요."
         if self.agent is not None:
             return
-        # from app.agents.dummy import Agent
-        from app.agents.stock_agent import Agent
-        self.agent = Agent()
+        from app.agents.stock_agent import create_stock_agent
+        self.agent = create_stock_agent(
+            model=self.model,
+            checkpointer=self.checkpointer,
+        )
 
     # 실제 대화 로직
     @log_execution
     async def process_query(self, user_messages: str, thread_id: uuid.UUID):
         """LangChain Messages 형식의 쿼리를 처리하고 AIMessage 형식으로 반환합니다."""
         try:
+            # checkpointer 초기화 (첫 호출 시만 실행)
+            await self._init_checkpointer()
             # 에이전트 초기화 (한 번만)
             self._create_agent(thread_id=thread_id)
 
@@ -43,6 +65,7 @@ class AgentService:
             agent_stream = self.agent.astream(
                 {"messages": [HumanMessage(content=user_messages)]},
                 config={"configurable": {"thread_id": str(thread_id)}},
+                stream_mode="updates",
             )
 
             agent_iterator = agent_stream.__aiter__()
