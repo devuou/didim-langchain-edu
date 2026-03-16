@@ -42,8 +42,9 @@ def create_stock_agent(model: ChatOpenAI, checkpointer: BaseCheckpointSaver[Any]
     Returns:
         create_agent()로 생성된 LangChain 에이전트
     """
-    if checkpointer is None:
-        checkpointer = MemorySaver()
+    
+    # if checkpointer is None:
+    #     checkpointer = MemorySaver()
 
     agent = create_agent(
         model=model,

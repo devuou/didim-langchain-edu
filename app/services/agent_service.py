@@ -4,11 +4,31 @@ from datetime import datetime
 import json
 from typing import Optional
 import uuid
+import os
 
 from app.utils.logger import log_execution, custom_logger
 
 from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphRecursionError
+
+
+def _configure_opik():
+    """settings.OPIK 값을 기반으로 Opik 환경변수를 설정합니다."""
+    from app.core.config import settings
+
+    if settings.OPIK is None:
+        return
+
+    if settings.OPIK.URL_OVERRIDE:
+        os.environ["OPIK_URL_OVERRIDE"] = settings.OPIK.URL_OVERRIDE
+    if settings.OPIK.API_KEY:
+        os.environ["OPIK_API_KEY"] = settings.OPIK.API_KEY
+    if settings.OPIK.WORKSPACE:
+        os.environ["OPIK_WORKSPACE"] = settings.OPIK.WORKSPACE
+    if settings.OPIK.PROJECT:
+        os.environ["OPIK_PROJECT_NAME"] = settings.OPIK.PROJECT
+
+_configure_opik()
 
 
 class AgentService:
@@ -21,6 +41,13 @@ class AgentService:
         self.model = ChatOpenAI(
             model=settings.OPENAI_MODEL,
             api_key=SecretStr(settings.OPENAI_API_KEY),
+        )
+
+        # Opik tracer 초기화
+        from opik.integrations.langchain import OpikTracer
+        self.opik_tracer = OpikTracer(
+            tags=["stock-agent"],
+            metadata={"model": settings.OPENAI_MODEL},
         )
 
         # 대화 이력 저장소: process_query 첫 호출 시 초기화
@@ -47,6 +74,11 @@ class AgentService:
             model=self.model,
             checkpointer=self.checkpointer,
         )
+
+        # Opik tracer 적용
+        if self.opik_tracer is not None:
+            from opik.integrations.langchain import track_langgraph
+            self.agent = track_langgraph(self.agent, self.opik_tracer)
 
     # 실제 대화 로직
     @log_execution
