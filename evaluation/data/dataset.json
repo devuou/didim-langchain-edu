@@ -1,0 +1,62 @@
+[
+  {
+    "input": "AAPL 현재 주가 알려줘",
+    "expected_output": "AAPL의 현재 주가와 전일 대비 등락률이 포함된 답변"
+  },
+  {
+    "input": "TSLA 지금 얼마야?",
+    "expected_output": "TSLA의 현재 주가와 전일 대비 등락률이 포함된 답변"
+  },
+  {
+    "input": "NVDA 오늘 주가 변동 어때?",
+    "expected_output": "NVDA의 현재 주가와 전일 대비 등락률이 포함된 답변"
+  },
+  {
+    "input": "MSFT 시가총액 알려줘",
+    "expected_output": "MSFT의 시가총액이 포함된 답변"
+  },
+  {
+    "input": "AAPL PER 얼마야?",
+    "expected_output": "AAPL의 PER(주가수익비율) 수치가 포함된 답변"
+  },
+  {
+    "input": "NVDA 어떤 업종이야?",
+    "expected_output": "NVDA의 업종 정보가 포함된 답변"
+  },
+  {
+    "input": "TSLA 최근 뉴스 알려줘",
+    "expected_output": "TSLA 관련 최근 뉴스 1건 이상의 제목 또는 내용이 포함된 답변"
+  },
+  {
+    "input": "MSFT 요즘 무슨 뉴스 있어?",
+    "expected_output": "MSFT 관련 최근 뉴스 1건 이상의 제목 또는 내용이 포함된 답변"
+  },
+  {
+    "input": "AAPL 최근 30일 주가 추이 보여줘",
+    "expected_output": "AAPL의 최근 30일간 OHLCV 또는 주가 변동 데이터가 포함된 답변"
+  },
+  {
+    "input": "NVDA 지난 7일 주가 알려줘",
+    "expected_output": "NVDA의 최근 7일간 주가 데이터가 포함된 답변"
+  },
+  {
+    "input": "AAPL 주가랑 최근 뉴스 같이 알려줘",
+    "expected_output": "AAPL의 현재 주가와 최근 뉴스가 모두 포함된 답변"
+  },
+  {
+    "input": "MSFT 시가총액이랑 PER 알려줘",
+    "expected_output": "MSFT의 시가총액과 PER 수치가 모두 포함된 답변"
+  },
+  {
+    "input": "MSFT 배당 정보 알려줘",
+    "expected_output": "배당 정보는 제공하지 않는다는 안내와 함께 제공 가능한 기능(주가, 회사 정보, 뉴스 등)을 안내하는 답변"
+  },
+  {
+    "input": "AAPL 내년 주가 전망 어때?",
+    "expected_output": "주가 전망은 제공하지 않는다는 안내와 함께 제공 가능한 기능을 안내하는 답변"
+  },
+  {
+    "input": "지금 어떤 주식 사면 좋아?",
+    "expected_output": "투자 추천은 제공하지 않는다는 안내와 함께 제공 가능한 기능을 안내하는 답변"
+  }
+]

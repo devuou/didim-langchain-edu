@@ -125,6 +125,14 @@ agent/
 │   ├── services/
 │   │   └── agent_service.py  # 에이전트 실행 및 스트리밍 처리
 │   └── main.py               # FastAPI 앱 진입점 (lifespan으로 ES 적재)
+├── evaluation/
+│   ├── data/
+│   │   └── dataset.json      # 평가 질문 15건 (expected_output 포함)
+│   ├── metrics/
+│   │   ├── stock_hallucination.py     # 환각 감지 메트릭
+│   │   ├── stock_answer_relevance.py  # 답변 관련성 메트릭
+│   │   └── stock_task_completion.py   # 작업 완료 메트릭 (GEval 기반)
+│   └── run_eval.py           # Opik 평가 실행 진입점 (서버 불필요)
 ├── docs/
 │   ├── spec.md               # API 명세
 │   └── daily-record/         # 개발 일지

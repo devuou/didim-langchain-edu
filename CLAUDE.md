@@ -20,6 +20,10 @@ uv run pytest tests/test_main.py
 # Run a single test
 uv run pytest tests/test_main.py::test_root
 
+# Run evaluation (standalone, no server required)
+uv run python evaluation/run_eval.py --level L1   # 빠른 검증 (5건)
+uv run python evaluation/run_eval.py --level L2   # 전체 평가 (15건)
+
 # Lint
 uv run ruff check .
 
@@ -36,6 +40,9 @@ Copy `env.sample` to `.env` and set:
 - `ES_URL` — Elasticsearch URL, default `http://localhost:9200`
 - `ES_USERNAME` / `ES_PASSWORD` — ES basic auth credentials
 - `ES_INDEX_PREFIX` — index name prefix to avoid conflicts on shared clusters, default `dev`
+- `OPIK__URL_OVERRIDE` — Opik self-hosted URL (e.g. `https://your-opik-host/api`)
+- `OPIK__PROJECT` — Opik project name
+- `OPIK__WORKSPACE` — Opik workspace name, default `default`
 
 ## Architecture
 
