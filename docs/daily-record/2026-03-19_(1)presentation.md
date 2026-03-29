@@ -11,6 +11,15 @@
 ```
 사용자: "AAPL 현재 주가랑 최근 뉴스 알려줘"
 에이전트: get_stock_price + get_recent_news 호출 → 답변
+답변: 
+AAPL(애플)의 현재 주가는 $251.64이며, 전일 대비 0.06% 상승했습니다.
+최근 뉴스는 다음과 같습니다:
+1. Tech 기업 소식: Anthropic이 새 Claude 기능을 발표, Nvidia의 젠슨 황이 AGI(범용 인공지능) 시대가 도래했다고 언급
+   https://finance.yahoo.com/news/live/tech-stocks-today-anthropic-announces-new-claude-capability-nvidias-jensen-huang-says-agi-era-is-here-144220360.html
+2. 애플 아이폰, 2026년 시장 점유율 확대 전망
+   https://finance.yahoo.com/news/apples-iphone-set-to-gain-share-in-2026-amid-broader-market-declines-183044647.html
+3. 뱅크오브아메리카, 마이크로소프트 주식 커버리지 재개
+   https://www.thestreet.com/investing/stocks/bank-of-america-reinstates-microsoft-stock-coverage
 ```
 
 ### 기술 스택

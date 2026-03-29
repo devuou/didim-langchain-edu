@@ -55,20 +55,17 @@ class AgentService:
         self.agent = None
         self.progress_queue: asyncio.Queue = asyncio.Queue()
 
-    async def _init_checkpointer(self):
-        """MemorySaver 초기화 (첫 호출 시 한 번만 실행)"""
-        if self.checkpointer is not None:
-            return
-        from langgraph.checkpoint.memory import MemorySaver
-        self.checkpointer = MemorySaver()
-
-    def _create_agent(self, thread_id: uuid.UUID = None):
-        """LangChain 에이전트 생성"""
+    async def _create_agent(self):
+        """LangChain 에이전트 생성 (최초 1회만 실행)"""
         # IMP: DeepAgents 라이브러리를 사용하여 LangGraph 기반의 에이전트를 생성하는 구현.
         # LLM 모델, 사용할 도구(Tools), 시스템 프롬프트, 상태 저장소(Checkpointer), 그리고 응답 포맷(ToolStrategy)을 결합하여 워크플로우를 초기화합니다.
-        assert self.checkpointer is not None, "checkpointer가 초기화되지 않았습니다. _init_checkpointer를 먼저 호출하세요."
         if self.agent is not None:
             return
+
+        if self.checkpointer is None:
+            from langgraph.checkpoint.memory import MemorySaver
+            self.checkpointer = MemorySaver()
+
         from app.agents.stock_agent import create_stock_agent
         self.agent = create_stock_agent(
             model=self.model,
@@ -85,10 +82,9 @@ class AgentService:
     async def process_query(self, user_messages: str, thread_id: uuid.UUID):
         """LangChain Messages 형식의 쿼리를 처리하고 AIMessage 형식으로 반환합니다."""
         try:
-            # checkpointer 초기화 (첫 호출 시만 실행)
-            await self._init_checkpointer()
-            # 에이전트 초기화 (한 번만)
-            self._create_agent(thread_id=thread_id)
+            # 에이전트 초기화 (최초 1회만 실행)
+            if self.agent is None:
+                await self._create_agent()
 
             custom_logger.info(f"사용자 메시지: {user_messages}")
 
