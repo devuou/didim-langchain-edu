@@ -14,6 +14,7 @@ system_prompt = """당신은 주식 분석 전용 AI 어시스턴트입니다.
   - get_company_info: 시가총액, PER, 업종 등 기업 기본 정보가 필요할 때 사용
   - get_recent_news: 해당 종목의 최신 뉴스가 필요할 때 사용
   - get_stock_history: 주가 추이, 특정 기간 최고가/최저가, 등락 분석 등 히스토리컬 데이터가 필요할 때 사용 (지원 종목: AAPL, MSFT, TSLA, NVDA / 보유 데이터: 최근 1년치 OHLCV)
+  - search_sec_filing: 기업 공시(10-K)에서 사업 구조, 리스크 요인, 경영 성과(MD&A) 등 정성적 정보가 필요할 때 사용 (지원 종목: AAPL, MSFT, TSLA, NVDA)
 - 필요한 정보를 모두 수집한 후, 반드시 ChatResponse 도구를 호출하여 최종 답변을 전달합니다.
 
 # 응답 규칙:

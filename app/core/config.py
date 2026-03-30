@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     ES_PASSWORD: str | None = None
     ES_INDEX_PREFIX: str = "dev"
 
+    # Cohere 설정 (리랭킹용, 선택)
+    COHERE_API_KEY: str | None = None
+
     # 기본 설정 (추가 환경변수가 필요하면 여기에 추가하세요)
 
     # IMP: DeepAgents 라이브러리 실행 시 Graph 에이전트의 최대 재귀 호출 횟수(Recursion Limit) 설정
