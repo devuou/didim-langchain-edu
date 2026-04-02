@@ -167,7 +167,7 @@ class AgentService:
                                 else:
                                     yield f'{{"step": "model", "tool_calls": {json.dumps([tool["name"] for tool in tool_calls])}}}'
                             if step == "tools":
-                                yield f'{{"step": "tools", "name": {json.dumps(message.name)}, "content": {message.content}}}'
+                                yield f'{{"step": "tools", "name": {json.dumps(message.name)}, "content": {json.dumps(message.content, ensure_ascii=False)}}}'
                     except Exception as e:
                         # 청크 처리 중 예외 발생
                         custom_logger.error(f"Error processing chunk: {e}")

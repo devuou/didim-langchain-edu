@@ -19,6 +19,8 @@ agent-sample의 search_agent.py 패턴을 따른다.
 from __future__ import annotations
 
 from typing_extensions import TypedDict
+from langgraph.graph import StateGraph, START, END
+from langchain_core.tools import tool
 
 from app.agents.tools._rag_common import (
     get_es_client,
@@ -79,20 +81,24 @@ def vector_search(state: SecSearchState) -> dict:
     - k: 반환할 최근접 이웃 수
     - num_candidates: kNN 후보 탐색 범위 (클수록 정확하지만 느림)
     - filter: ticker로 종목 한정
+    - 임베딩 또는 ES 호출 실패 시 빈 hits를 반환하여 BM25 결과만으로 계속 진행한다.
     """
-    es = get_es_client()
-    query_vector = embed_query(state["query"])
-    body = {
-        "knn": {
-            "field": "embedding",
-            "query_vector": query_vector,
-            "k": _TOP_K,
-            "num_candidates": 100,
-            "filter": [{"term": {"ticker": state["ticker"]}}],
+    try:
+        es = get_es_client()
+        query_vector = embed_query(state["query"])
+        body = {
+            "knn": {
+                "field": "embedding",
+                "query_vector": query_vector,
+                "k": _TOP_K,
+                "num_candidates": 100,
+                "filter": [{"term": {"ticker": state["ticker"]}}],
+            }
         }
-    }
-    resp = es.search(index=_INDEX_NAME, body=body)
-    return {"vector_hits": resp["hits"]["hits"]}
+        resp = es.search(index=_INDEX_NAME, body=body)
+        return {"vector_hits": resp["hits"]["hits"]}
+    except Exception:
+        return {"vector_hits": []}
 
 
 def _merge_results_fn(state: dict) -> dict:
@@ -138,10 +144,6 @@ def rerank(state: SecSearchState) -> dict:
 
 
 # ─── 그래프 조립 ──────────────────────────────────────────────────────────────
-
-from langgraph.graph import StateGraph, START, END
-from langchain_core.tools import tool
-
 
 def _build_graph():
     """StateGraph를 조립하고 컴파일한 그래프를 반환한다.

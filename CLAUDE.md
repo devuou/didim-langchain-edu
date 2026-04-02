@@ -43,6 +43,7 @@ Copy `env.sample` to `.env` and set:
 - `OPIK__URL_OVERRIDE` — Opik self-hosted URL (e.g. `https://your-opik-host/api`)
 - `OPIK__PROJECT` — Opik project name
 - `OPIK__WORKSPACE` — Opik workspace name, default `default`
+- `ES_RERANKER_INFERENCE_ID` — ES Inference API rerank endpoint ID (e.g. `.rerank-v1-elasticsearch`); optional, fallback to score sort if unset
 
 ## Architecture
 
@@ -64,7 +65,8 @@ SSE steps: `model` (tool decision) → `tools` (tool results) → `done` (final 
 
 - **`app/api/routes/`** — FastAPI endpoints: `chat.py` (streaming SSE), `threads.py` (conversation history)
 - **`app/services/`** — Business logic: `agent_service.py` (LLM orchestration), `conversation_service.py` (in-memory history), `threads_service.py` (JSON data access)
-- **`app/agents/`** — Agent implementations: `stock_agent.py` (LangGraph ReAct agent), `tools.py` (yfinance real-time tools), `es_tools.py` (Elasticsearch historical tools), `prompts.py` (system prompts)
+- **`app/agents/`** — Agent implementations: `stock_agent.py` (LangGraph ReAct agent), `tools/` (yfinance real-time tools + `_rag_common.py` ES/OpenAI singletons), `es_tools.py` (Elasticsearch historical tools), `sec_search_agent.py` (LangGraph StateGraph subagent: BM25+kNN fan-out → merge → ES rerank, exposed as `search_sec_filing` tool), `prompts.py` (system prompts)
+- **`scripts/`** — Offline data pipelines: `ingest_10k.py` (SEC EDGAR → section extraction → tiktoken chunking → OpenAI embedding → ES bulk upsert)
 - **`app/elasticsearch/`** — Elasticsearch integration: `client.py` (singleton client), `ingester.py` (yfinance → ES bulk upsert, runs on startup), `retriever.py` (ElasticsearchRetriever + document_mapper)
 - **`app/core/config.py`** — Pydantic-Settings config loaded from `.env` (nested via `__` delimiter)
 - **`app/data/`** — JSON-based persistence: `threads.json` (index), `threads/{thread_id}.json` (messages), `favorite_questions.json`

@@ -9,7 +9,7 @@ FastAPI + LangGraph 기반의 주식 분석 특화 AI Agent 서버입니다.
 - **LangChain / LangGraph** — ReAct 에이전트 및 대화 흐름 관리
 - **OpenAI GPT-4** — LLM
 - **yfinance** — 실시간 주식 데이터 조회
-- **Elasticsearch** — OHLCV 히스토리컬 데이터 저장 및 검색
+- **Elasticsearch** — OHLCV 히스토리컬 데이터 저장 및 검색 / SEC 10-K RAG (BM25 + kNN + ES rerank)
 - **uv** — 패키지 관리
 
 ## 에이전트 기능
@@ -20,6 +20,7 @@ FastAPI + LangGraph 기반의 주식 분석 특화 AI Agent 서버입니다.
 | `get_company_info` | yfinance (실시간) | 시가총액, PER, 업종 | `AAPL \| 시가총액: 3.83조 달러 \| PER: 33.02 \| 업종: Technology` |
 | `get_recent_news` | yfinance (실시간) | 최근 뉴스 최대 3건 (제목 + 링크) | — |
 | `get_stock_history` | Elasticsearch | OHLCV 히스토리컬 데이터 조회 (지원 종목: AAPL, MSFT, TSLA, NVDA) | — |
+| `search_sec_filing` | Elasticsearch (10-K RAG) | SEC 10-K 공시 기반 정성 정보 검색 — BM25 + kNN 병렬 검색 후 ES rerank (지원 종목: AAPL, MSFT, TSLA, NVDA) | — |
 
 - 여러 tool을 조합한 복합 질문 처리 (예: "AAPL 주가랑 최근 뉴스 알려줘")
 - thread_id 기반 멀티턴 대화 (대화 이력 유지)
@@ -62,9 +63,17 @@ ES_URL=https://your-elasticsearch-host
 ES_USERNAME=elastic
 ES_PASSWORD=your_es_password
 ES_INDEX_PREFIX=dev
+
+# SEC 10-K RAG (선택 — 설정 시 search_sec_filing 도구에서 리랭킹 활성화)
+ES_RERANKER_INFERENCE_ID=.rerank-v1-elasticsearch
 ```
 
 서버 시작 시 Elasticsearch에 4개 종목(AAPL, MSFT, TSLA, NVDA)의 1년치 OHLCV 데이터가 자동으로 적재됩니다.
+
+SEC 10-K 공시 데이터는 별도 스크립트로 적재합니다:
+```bash
+uv run python scripts/ingest_10k.py
+```
 
 ### 4. 서버 실행
 
@@ -109,10 +118,14 @@ data: {"step": "done", "message_id": "...", "role": "assistant", "content": "...
 agent/
 ├── app/
 │   ├── agents/
-│   │   ├── tools.py          # yfinance 기반 실시간 tool 3종
-│   │   ├── es_tools.py       # Elasticsearch 기반 히스토리컬 tool
-│   │   ├── stock_agent.py    # LangGraph ReAct 에이전트
-│   │   └── prompts.py        # 시스템 프롬프트
+│   │   ├── tools/
+│   │   │   ├── __init__.py       # yfinance 기반 실시간 tool 3종
+│   │   │   └── _rag_common.py    # ES / OpenAI 싱글톤, embed_query, rerank_hits, format_hits
+│   │   ├── es_tools.py           # Elasticsearch 기반 히스토리컬 tool
+│   │   ├── sec_search_agent.py   # LangGraph StateGraph 서브 에이전트 (BM25+kNN → merge → rerank)
+│   │   │                         # search_sec_filing @tool로 래핑 (subagent-as-tool 패턴)
+│   │   ├── stock_agent.py        # LangGraph ReAct 에이전트 (search_sec_filing 포함)
+│   │   └── prompts.py            # 시스템 프롬프트
 │   ├── elasticsearch/
 │   │   ├── client.py         # ES 클라이언트 싱글턴
 │   │   ├── ingester.py       # yfinance → ES bulk upsert (앱 시작 시 실행)
@@ -125,6 +138,8 @@ agent/
 │   ├── services/
 │   │   └── agent_service.py  # 에이전트 실행 및 스트리밍 처리
 │   └── main.py               # FastAPI 앱 진입점 (lifespan으로 ES 적재)
+├── scripts/
+│   └── ingest_10k.py         # SEC EDGAR 다운로드 → 섹션 추출 → 청킹 → 임베딩 → ES 적재
 ├── evaluation/
 │   ├── data/
 │   │   └── dataset.json      # 평가 질문 15건 (expected_output 포함)

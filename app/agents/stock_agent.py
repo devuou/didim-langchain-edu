@@ -7,7 +7,6 @@ from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.memory import MemorySaver
 
 from app.agents.es_tools import get_stock_history
 from app.agents.prompts import system_prompt
@@ -49,14 +48,11 @@ def create_stock_agent(model: ChatOpenAI, checkpointer: BaseCheckpointSaver[Any]
 
     Args:
         model: 초기화된 ChatOpenAI 인스턴스
-        checkpointer: 대화 이력을 저장할 checkpointer (기본값: MemorySaver)
+        checkpointer: 대화 이력을 저장할 checkpointer (기본값: None, caller가 주입)
 
     Returns:
         create_agent()로 생성된 LangChain 에이전트
     """
-
-    # if checkpointer is None:
-    #     checkpointer = MemorySaver()
 
     agent = create_agent(
         model=model,

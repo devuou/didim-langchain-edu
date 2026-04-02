@@ -6,14 +6,16 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
-# TYPE_CHECKING 블록: 타입 힌트 전용 import.
-# 런타임에는 실행되지 않아 무거운 라이브러리(elasticsearch, openai 등)를
-# 모듈 로드 시점에 불러오지 않아도 된다.
+# TYPE_CHECKING 블록: 타입 체커(mypy/pyright)를 위한 전방 참조 임포트.
+# 런타임에는 실행되지 않는다. 실제 런타임 임포트는 각 함수 body 안에서 lazy하게 수행된다.
 if TYPE_CHECKING:
     from elasticsearch import Elasticsearch
     from openai import OpenAI
+
+logger = logging.getLogger(__name__)
 
 # ─── 싱글톤 전역 변수 ──────────────────────────────────────────────────────────
 # None으로 초기화 → 처음 get_*() 호출 시 생성(lazy init)
@@ -93,7 +95,8 @@ def rerank_hits(query: str, hits: list[dict]) -> list[dict] | None:
         # index는 입력 texts/hits 목록의 인덱스와 대응됨
         ranked = resp.get("rerank", [])
         return [hits[item["index"]] for item in ranked]
-    except Exception:
+    except Exception as exc:
+        logger.warning("rerank failed, falling back to score sort: %s", exc)
         return None
 
 
