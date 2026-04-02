@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     ES_PASSWORD: str | None = None
     ES_INDEX_PREFIX: str = "dev"
 
-    # Cohere 설정 (리랭킹용, 선택)
-    COHERE_API_KEY: str | None = None
+    # ES 호스팅 리랭커 설정 (선택)
+    # eland 또는 Elastic 기본 제공 모델의 inference endpoint ID (GET _inference 로 확인)
+    ES_RERANKER_INFERENCE_ID: str | None = None
 
     # 기본 설정 (추가 환경변수가 필요하면 여기에 추가하세요)
 
