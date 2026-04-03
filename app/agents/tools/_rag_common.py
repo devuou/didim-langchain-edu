@@ -66,35 +66,33 @@ def embed_query(query: str) -> list[float]:
 
 
 def rerank_hits(query: str, hits: list[dict]) -> list[dict] | None:
-    """ES Inference API로 hits를 리랭킹한다.
+    """Cohere Rerank API로 hits를 리랭킹한다.
 
-    ES_RERANKER_INFERENCE_ID가 설정되지 않았거나 호출에 실패하면 None을 반환한다.
+    COHERE_API_KEY가 설정되지 않았거나 호출에 실패하면 None을 반환한다.
     None이면 호출 측에서 score 내림차순 정렬로 fallback해야 한다.
 
-    ES Inference rerank API:
-    - 입력: query(질문), input(텍스트 목록)
-    - 출력: rerank 결과 목록 (index: 원본 hits의 인덱스, score: 관련도 점수)
+    Cohere rerank API:
+    - 입력: query(질문), documents(텍스트 목록)
+    - 출력: rerank 결과 목록 (index: 원본 hits의 인덱스, relevance_score: 관련도 점수)
     - 결과는 score 내림차순으로 이미 정렬되어 반환된다.
     """
     try:
         from app.core.config import settings
-        inference_id = settings.ES_RERANKER_INFERENCE_ID
-        if not inference_id or not hits:
+        if not settings.COHERE_API_KEY or not hits:
             return None
 
-        es = get_es_client()
+        import cohere
+        co = cohere.ClientV2(settings.COHERE_API_KEY)
         texts = [h["_source"]["text"] for h in hits]
 
-        resp = es.inference.inference(
-            task_type="rerank",
-            inference_id=inference_id,
-            body={"query": query, "input": texts},
+        resp = co.rerank(
+            model="rerank-v3.5",
+            query=query,
+            documents=texts,
         )
 
-        # resp["rerank"]: [{"index": 2, "score": 0.94, ...}, ...]
-        # index는 입력 texts/hits 목록의 인덱스와 대응됨
-        ranked = resp.get("rerank", [])
-        return [hits[item["index"]] for item in ranked]
+        # resp.results: [RerankResponseResultsItem(index=2, relevance_score=0.94), ...]
+        return [hits[item.index] for item in resp.results]
     except Exception as exc:
         logger.warning("rerank failed, falling back to score sort: %s", exc)
         return None
