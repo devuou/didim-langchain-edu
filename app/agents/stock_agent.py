@@ -54,6 +54,9 @@ def create_stock_agent(model: ChatOpenAI, checkpointer: BaseCheckpointSaver[Any]
         create_agent()로 생성된 LangChain 에이전트
     """
 
+    # 여러 종목을 동시에 조회하는 질문에서 tool call을 병렬 실행
+    model = model.bind(parallel_tool_calls=True)
+
     agent = create_agent(
         model=model,
         # 도구 목록: 실시간 데이터 3종 + 히스토리컬 데이터 1종 + SEC 공시 RAG 1종

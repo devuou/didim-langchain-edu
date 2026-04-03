@@ -112,7 +112,7 @@ def format_hits(hits: list[dict]) -> str:
     for i, hit in enumerate(hits, 1):
         src = hit["_source"]
         lines.append(
-            f"[{i}] 섹션: {src.get('section', '')} | 티커: {src.get('ticker', '')}\n"
+            f"[{i}] 섹션: {src.get('section', '')} | 티커: {src.get('ticker', '')} | 회계연도: {src.get('fiscal_year', 'N/A')}\n"
             f"{src.get('text', '').strip()}"
         )
     return "\n\n".join(lines)
