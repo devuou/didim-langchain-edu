@@ -36,6 +36,7 @@ from opik.evaluation import evaluate
 from evaluation.metrics.stock_hallucination import StockHallucination
 from evaluation.metrics.stock_answer_relevance import StockAnswerRelevance
 from evaluation.metrics.stock_task_completion import StockTaskCompletion
+from evaluation.metrics.sec_groundedness import SecGroundedness
 
 
 # ---------------------------------------------------------------------------
@@ -48,8 +49,8 @@ LEVEL_CONFIG = {
         "metrics": ["hallucination", "relevance"],
     },
     "L2": {
-        "nb_samples": 15,
-        "metrics": ["hallucination", "relevance", "task_completion"],
+        "nb_samples": 21,
+        "metrics": ["hallucination", "relevance", "task_completion", "groundedness"],
     },
 }
 
@@ -57,6 +58,7 @@ METRIC_MAP = {
     "hallucination": StockHallucination,
     "relevance": StockAnswerRelevance,
     "task_completion": StockTaskCompletion,
+    "groundedness": SecGroundedness,
 }
 
 # 평가용 데이터셋 — evaluation/data/dataset.json 에서 로드
@@ -96,11 +98,16 @@ _agent = _build_agent()
 # ---------------------------------------------------------------------------
 
 @track  # Opik 데코레이터로 이 함수가 호출될 때마다 Opik 서버에 자동으로 기록
-def run_stock_agent(question: str, thread_id: str) -> str:
-    """주식 에이전트를 동기적으로 실행하고 최종 답변을 반환합니다."""
+def run_stock_agent(question: str, thread_id: str) -> tuple[str, list[str]]:
+    """주식 에이전트를 동기적으로 실행하고 (최종 답변, SEC 도구 출력 목록)을 반환합니다.
 
-    async def _stream() -> str:
+    tool_outputs: search_sec_filing 호출 시 반환된 텍스트 목록.
+    SecGroundedness 메트릭의 context로 사용된다.
+    """
+
+    async def _stream() -> tuple[str, list[str]]:
         final = ""
+        tool_outputs: list[str] = []
         from langchain_core.messages import HumanMessage
 
         async for chunk in _agent.astream(
@@ -109,6 +116,11 @@ def run_stock_agent(question: str, thread_id: str) -> str:
             stream_mode="updates",
         ):
             for step, event in chunk.items():
+                if step == "tools":
+                    messages = event.get("messages", [])
+                    for msg in messages:
+                        if getattr(msg, "name", None) == "search_sec_filing":
+                            tool_outputs.append(msg.content)
                 if step != "model":
                     continue
                 messages = event.get("messages", [])
@@ -118,7 +130,7 @@ def run_stock_agent(question: str, thread_id: str) -> str:
                 for tool in tool_calls:
                     if tool.get("name") == "ChatResponse":
                         final = tool.get("args", {}).get("content", "")
-        return final
+        return final, tool_outputs
 
     return asyncio.run(_stream())  # 비동기 에이전트를 동기 함수로 감싼 래퍼
 
@@ -131,10 +143,12 @@ def evaluation_task(dataset_item: dict) -> dict:
     """Opik evaluate()가 각 데이터셋 항목에 대해 호출하는 task 함수."""
     question = dataset_item["input"]
     thread_id = f"eval-{dataset_item.get('id', uuid.uuid4())}"
-    output = run_stock_agent(question, thread_id)
+    output, tool_outputs = run_stock_agent(question, thread_id)
     return {
         "input": question,
         "output": output,
+        "expected_output": dataset_item.get("expected_output", ""),
+        "context": tool_outputs,  # SecGroundedness가 사용. 비어있으면 해당 항목 skip.
     }
 
 

@@ -1,0 +1,62 @@
+[
+  {
+    "ticker": "AAPL",
+    "query": "애플의 주요 제품과 서비스 부문은?",
+    "section": "item1",
+    "expected_output": "iPhone, Mac, iPad, Wearables, Services 등 주요 사업 부문이 언급된 검색 결과"
+  },
+  {
+    "ticker": "MSFT",
+    "query": "마이크로소프트가 공시한 주요 사업 리스크는?",
+    "section": "item1a",
+    "expected_output": "경쟁, 규제, 사이버 보안 등 리스크 요인이 포함된 검색 결과"
+  },
+  {
+    "ticker": "AAPL",
+    "query": "애플 최근 사업연도 매출 성과는?",
+    "section": "item7",
+    "expected_output": "매출, 수익 등 재무 성과에 대한 경영진 분석 내용이 포함된 검색 결과"
+  },
+  {
+    "ticker": "AMZN",
+    "query": "아마존 리스크 알려줘",
+    "section": "unsupported",
+    "expected_output": "관련 공시 정보를 찾을 수 없습니다."
+  },
+  {
+    "ticker": "NVDA",
+    "query": "NVDA의 핵심 사업 영역은?",
+    "section": "item1",
+    "expected_output": "데이터센터, 게이밍 GPU, AI 칩 등 핵심 사업이 포함된 검색 결과"
+  },
+  {
+    "ticker": "TSLA",
+    "query": "테슬라의 공급망 리스크는?",
+    "section": "item1a",
+    "expected_output": "배터리, 반도체, 원자재 공급망 관련 리스크가 포함된 검색 결과"
+  },
+  {
+    "ticker": "NVDA",
+    "query": "NVDA의 AI 사업 성과는?",
+    "section": "item7",
+    "expected_output": "AI, 데이터센터 관련 매출 성장 내용이 포함된 검색 결과"
+  },
+  {
+    "ticker": "GOOGL",
+    "query": "구글 사업구조 알려줘",
+    "section": "unsupported",
+    "expected_output": "관련 공시 정보를 찾을 수 없습니다."
+  },
+  {
+    "ticker": "MSFT",
+    "query": "마이크로소프트 클라우드 전략과 관련 리스크는?",
+    "section": "item1",
+    "expected_output": "Azure 클라우드 전략과 관련 경쟁, 규제 리스크가 모두 포함된 검색 결과"
+  },
+  {
+    "ticker": "TSLA",
+    "query": "테슬라 전기차 시장 전략과 경쟁 리스크는?",
+    "section": "item1",
+    "expected_output": "EV 시장 전략과 경쟁사 관련 리스크가 모두 포함된 검색 결과"
+  }
+]
