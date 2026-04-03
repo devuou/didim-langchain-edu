@@ -52,8 +52,9 @@ class SecSearchState(TypedDict):
 
 # ES 인덱스 이름: ingest_10k.py의 build_index_name()과 동일 규칙으로 생성
 _INDEX_NAME = f"{settings.ES_INDEX_PREFIX}-10k-docs"
-_TOP_K = 20       # BM25 / kNN 각각 최대 20개 검색
-_FINAL_TOP_N = 5  # 리랭킹 후 LLM에 전달할 최종 청크 수
+_TOP_K = 20            # BM25 / kNN 각각 최대 20개 검색
+_NUM_CANDIDATES = 100  # kNN 후보 탐색 범위 (클수록 정확하지만 느림, 최소 _TOP_K 이상)
+_FINAL_TOP_N = 5       # 리랭킹 후 LLM에 전달할 최종 청크 수
 
 
 # ─── 노드 함수 ────────────────────────────────────────────────────────────────
@@ -95,7 +96,7 @@ def vector_search(state: SecSearchState) -> dict:
                 "field": "embedding",
                 "query_vector": query_vector,
                 "k": _TOP_K,
-                "num_candidates": 100,
+                "num_candidates": _NUM_CANDIDATES,
                 "filter": [{"term": {"ticker": state["ticker"]}}],
             }
         }

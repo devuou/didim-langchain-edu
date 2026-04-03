@@ -76,59 +76,8 @@ search_sec_filing  → 사업 구조, 리스크, MD&A 등 정성 정보
 
 ### 아키텍처 흐름
 
-```
-POST /api/v1/chat {thread_id, message}
-│
-▼
-┌──────────────────────────────────────────────────┐
-│  【메인 에이전트】 LangChain ReAct (create_agent)  │
-│                                                  │
-│  ┌─ model 스텝 ──────────────────────────────┐   │
-│  │  ChatOpenAI(GPT-4o) + system_prompt       │   │
-│  │  → 어떤 도구를 쓸지 결정                   │   │
-│  └───────────────────────────────────────────┘   │
-│            │                                     │
-│            ▼                                     │
-│  ┌─ tools 스텝 ──────────────────────────────────┐   │
-│  │  get_stock_price    (yfinance)                │   │
-│  │  get_company_info   (yfinance)                │   │
-│  │  get_recent_news    (yfinance)                │   │
-│  │  get_stock_history  (ES)                      │   │
-│  │  search_sec_filing  ──▶ LangGraph StateGraph  │   │
-│  └───────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────┘
-                         │
-         search_sec_filing 호출 시
-                         ▼
-┌──────────────────────────────────────────────────┐
-│  【서브 에이전트】 LangGraph StateGraph            │
-│                                                  │
-│       START                                      │
-│       /    \      ← fan-out (병렬)               │
-│      ▼      ▼                                    │
-│  bm25_    vector_                                │
-│  search   search (embed → kNN)                   │
-│      \    /       ← fan-in                       │
-│       ▼  ▼                                       │
-│  merge_results (_id 중복 제거, 높은 score 채택)   │
-│       │                                          │
-│       ▼                                          │
-│     rerank (seen_ids 제외 → Cohere Rerank API)   │
-│  → 상위 5청크 추출 → result + seen_ids 반환       │
-│       │                                          │
-│      END                                         │
-└──────────────────────────────────────────────────┘
-                         │
-             메인 에이전트 → 최종 답변 생성
-                         │
-                         ▼
-┌──────────────────────────────────────────────────┐
-│  SSE 이벤트 스트림                                │
-│  {"step":"model",  "tool_calls":["get_stock_price"]}
-│  {"step":"tools",  "name":"get_stock_price", ...}│
-│  {"step":"done",   "content":"..."}              │
-└──────────────────────────────────────────────────┘
-```
+
+![alt text](image.png)
 
 ---
 
@@ -177,6 +126,11 @@ def search_sec_filing(
 - `_seen_ids_cache`: `thread_id:ticker` 키로 이미 반환한 청크 ID를 보관 → "추가로 더 없어?" 요청 시 중복 청크 방지
 
 ### 데이터 준비 — RAG 파이프라인 ([`scripts/ingest_10k.py`](../../scripts/ingest_10k.py))
+
+**SEC EDGAR란?**
+- **SEC** (Securities and Exchange Commission) — 미국 증권거래위원회
+- **EDGAR** (Electronic Data Gathering, Analysis, and Retrieval) — SEC가 운영하는 공시 문서 전자 수집·검색 시스템
+- 미국 상장기업은 연간 보고서(10-K), 분기 보고서(10-Q) 등을 의무적으로 EDGAR에 제출해야 한다. `sec-edgar-downloader` 라이브러리로 API 키 없이 무료로 다운로드할 수 있다.
 
 서브 에이전트가 검색하는 데이터는 사전에 오프라인 파이프라인으로 ES에 적재된다. 서버 실행과 분리된 1회성 스크립트(`uv run python scripts/ingest_10k.py`)로 동작한다.
 
@@ -259,7 +213,7 @@ body = {
 
 ### 리랭킹 방식
 
-BM25와 kNN의 score는 **서로 다른 척도**다. 단순 합산이나 score 비교로 최종 순위를 정할 수 없다. 두 결과를 병합한 후 Cohere Rerank API(cross-encoder 기반)로 질문과의 실제 관련도를 재평가한다.
+BM25와 kNN의 score는 **서로 다른 척도**다. 단순 합산이나 score 비교로 최종 순위를 정할 수 없다. 두 결과를 병합한 후 Cohere Rerank API(cross-encoder 기반)로 질문과 각 청크 간 실제 관련도를 재평가한다.
 
 ```
 BM25 결과 (20개)  ┐
@@ -481,11 +435,77 @@ yield f'{{"step": "tools", "content": {json.dumps(message.content, ensure_ascii=
 
 ---
 
-### 5. yfinance 뉴스 오탐 — 단어 경계 미적용
+### 5. yfinance 뉴스 — 무관 기사 혼입 문제
 
-**증상**: `"EV" in "seven"` → True, `"EV" in "ever"` → True 오탐 발생.
+**근본 원인**: yfinance `stock.news`는 티커를 직접 매핑하지 않고 **섹터·키워드 기반**으로 뉴스를 집계한다. TSLA 조회 시 Lucid(경쟁사)·Anthropic 기사가 혼입되는 것은 yfinance 데이터 품질 문제로, 코드 레벨에서 완전히 제거할 수 없다.
 
-**해결**: `re.search(rf"\b{re.escape(kw)}\b", text, re.IGNORECASE)` — 단어 경계(`\b`) 기반 매칭으로 전환.
+---
+
+**1단계 — 3건 조회 후 LLM 필터링 (초기 구현, 실패)**
+
+```python
+# 3건만 가져와서 LLM이 알아서 걸러주길 기대
+news = stock.news[:3]
+```
+
+LLM이 무관 기사를 제외하면 1건만 남는 경우가 생겼고, 반환 건수가 불안정했다.
+
+---
+
+**2단계 — 도구 레벨 키워드 필터링으로 전환**
+
+LLM 의존을 없애고 도구에서 직접 필터링하는 방식으로 바꿨다.
+
+```python
+_NEWS_FETCH_LIMIT = 30  # 후보를 넓게 확보
+_NEWS_RETURN_LIMIT = 3  # 최종 반환 건수
+
+_TICKER_KEYWORDS = {
+    "TSLA": ["Tesla", "TSLA", "Elon Musk", "EV", "Cybertruck", "Model S", ...],
+    "NVDA": ["Nvidia", "NVIDIA", "NVDA", "GPU", "Jensen Huang", "CUDA", "H100", ...],
+    ...
+}
+
+# 30건 조회 → 키워드 포함 기사만 통과 → 최대 3건 반환
+relevant = [a for a in news[:_NEWS_FETCH_LIMIT] if _is_relevant(a) and _is_recent(a, cutoff)]
+```
+
+---
+
+**3단계 — 단어 경계 오탐 수정**
+
+키워드 필터 적용 후 새 문제 발생: `"EV" in "seven"` → True, `"EV" in "ever"` → True.
+
+```python
+# 수정 전 — 단순 부분 문자열 검색
+any(kw.lower() in text for kw in keywords)
+
+# 수정 후 — 단어 경계(\b) + re.escape (특수문자 포함 키워드 안전 처리)
+any(re.search(rf"\b{re.escape(kw)}\b", text, re.IGNORECASE) for kw in keywords)
+```
+
+---
+
+**4단계 — 날짜 필드 오류 수정 (`_is_recent`)**
+
+최신 30일 이내 뉴스만 반환하는 날짜 필터가 전혀 동작하지 않고 있었다.
+
+```python
+# 수정 전 — yfinance 신형 API에서 항상 None
+pub_ts = article.get("providerPublishTime")
+
+# 수정 후 — 신형 API의 실제 날짜 위치
+pub_str = article.get("content", {}).get("pubDate")  # ISO 8601 문자열
+pub_dt = datetime.fromisoformat(pub_str.replace("Z", "+00:00"))
+```
+
+---
+
+**현재 상태 및 미해결**
+
+yfinance 섹터 기반 집계는 라이브러리 내부 동작이므로 근본 해결 불가. 현재는 키워드 필터 후 관련 기사가 0건이면 "없음" 메시지를 반환한다 (필터 미통과 기사로 fallback하지 않음).
+
+Finnhub Company News API(티커 직접 매핑, 날짜 범위 파라미터 지원)로 대체하면 정확도가 높아지지만, 현재 키워드 필터로 충분히 안정화된 상태라 **도입 보류** 중.
 
 ---
 
