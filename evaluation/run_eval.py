@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import uuid
+
+logger = logging.getLogger(__name__)
 
 # ── .env 로드 및 Opik 환경변수 설정 ─────────────────────────────────────────
 from dotenv import load_dotenv
@@ -105,31 +108,40 @@ def run_stock_agent(question: str, thread_id: str) -> tuple[str, list[str]]:
     SecGroundedness 메트릭의 context로 사용된다.
     """
 
+    _TIMEOUT_SECONDS = 120  # 에이전트 응답 최대 대기 시간
+
     async def _stream() -> tuple[str, list[str]]:
         final = ""
         tool_outputs: list[str] = []
         from langchain_core.messages import HumanMessage
 
-        async for chunk in _agent.astream(
-            {"messages": [HumanMessage(content=question)]},
-            config={"configurable": {"thread_id": thread_id}},
-            stream_mode="updates",
-        ):
-            for step, event in chunk.items():
-                if step == "tools":
+        async def _run():
+            nonlocal final
+            async for chunk in _agent.astream(
+                {"messages": [HumanMessage(content=question)]},
+                config={"configurable": {"thread_id": thread_id}},
+                stream_mode="updates",
+            ):
+                for step, event in chunk.items():
+                    if step == "tools":
+                        messages = event.get("messages", [])
+                        for msg in messages:
+                            if getattr(msg, "name", None) == "search_sec_filing":
+                                tool_outputs.append(msg.content)
+                    if step != "model":
+                        continue
                     messages = event.get("messages", [])
-                    for msg in messages:
-                        if getattr(msg, "name", None) == "search_sec_filing":
-                            tool_outputs.append(msg.content)
-                if step != "model":
-                    continue
-                messages = event.get("messages", [])
-                if not messages:
-                    continue
-                tool_calls = messages[0].tool_calls
-                for tool in tool_calls:
-                    if tool.get("name") == "ChatResponse":
-                        final = tool.get("args", {}).get("content", "")
+                    if not messages:
+                        continue
+                    tool_calls = messages[0].tool_calls
+                    for tool in tool_calls:
+                        if tool.get("name") == "ChatResponse":
+                            final = tool.get("args", {}).get("content", "")
+
+        try:
+            await asyncio.wait_for(_run(), timeout=_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning("Agent timed out after %ds for question: %s", _TIMEOUT_SECONDS, question[:60])
         return final, tool_outputs
 
     return asyncio.run(_stream())  # 비동기 에이전트를 동기 함수로 감싼 래퍼
@@ -157,12 +169,12 @@ def evaluation_task(dataset_item: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def get_or_create_dataset(client: opik.Opik, name: str) -> opik.Dataset:
-    """데이터셋이 없으면 생성하고 항목을 삽입합니다."""
+    """데이터셋이 없으면 생성하고, 항목을 항상 최신 상태로 동기화합니다."""
     try:
         dataset = client.get_dataset(name=name)
     except Exception:
         dataset = client.create_dataset(name=name, description="주식 에이전트를 평가하기 위한 기본 DataSet")
-        dataset.insert(DATASET_ITEMS)
+    dataset.insert(DATASET_ITEMS)  # id 기준 upsert — 기존 항목 유지, 누락 항목 추가
     return dataset
 
 
@@ -203,6 +215,7 @@ def main():
         task=evaluation_task,
         scoring_metrics=metrics,
         nb_samples=nb_samples,
+        task_threads=1,  # asyncio.run() + MemorySaver 공유 시 thread-safety 문제 방지
         experiment_config={
             "level": args.level,
             "model": os.getenv("OPENAI_MODEL", "unknown"),

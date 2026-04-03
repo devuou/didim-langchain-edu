@@ -64,8 +64,8 @@ ES_USERNAME=elastic
 ES_PASSWORD=your_es_password
 ES_INDEX_PREFIX=dev
 
-# SEC 10-K RAG (선택 — 설정 시 search_sec_filing 도구에서 리랭킹 활성화)
-ES_RERANKER_INFERENCE_ID=.rerank-v1-elasticsearch
+# Cohere Rerank (선택 — 설정 시 search_sec_filing 도구에서 리랭킹 활성화)
+COHERE_API_KEY=your_cohere_api_key_here
 ```
 
 서버 시작 시 Elasticsearch에 4개 종목(AAPL, MSFT, TSLA, NVDA)의 1년치 OHLCV 데이터가 자동으로 적재됩니다.
@@ -109,11 +109,11 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 │            │                                            │
 │            ▼  (도구가 ChatResponse면 → done 이벤트)     │
 │  ┌─ tools 스텝 ──────────────────────────────────────┐  │
-│  │  [일반 도구]                [서브 에이전트 도구]   │  │
-│  │  get_stock_price            search_sec_filing      │  │
-│  │  get_company_info     ────▶ (LangGraph로 위임)     │  │
-│  │  get_recent_news                                   │  │
-│  │  get_stock_history                                 │  │
+│  │  get_stock_price    (yfinance)                    │  │
+│  │  get_company_info   (yfinance)                    │  │
+│  │  get_recent_news    (yfinance)                    │  │
+│  │  get_stock_history  (ES)                          │  │
+│  │  search_sec_filing  ──▶ LangGraph StateGraph      │  │
 │  └───────────────────────────────────────────────────┘  │
 │            │                                            │
 │            └── 도구 결과를 messages에 추가 → 다시 model │
@@ -140,7 +140,7 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 │       │                                                 │
 │       ▼                                                 │
 │     rerank                                              │
-│  (seen_ids 제외 → ES Inference API / score 내림차순 fallback) │
+│  (seen_ids 제외 → Cohere Rerank API / score 내림차순 fallback) │
 │  → 상위 5개 청크 추출 → result + seen_ids 반환          │
 │       │                                                 │
 │      END                                                │

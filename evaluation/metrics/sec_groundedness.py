@@ -18,9 +18,14 @@ class SecGroundedness(BaseMetric):
         self.name = name
         self._inner = Hallucination()
 
-    def score(self, output: str, **kwargs) -> score_result.ScoreResult | None:
+    def score(self, output: str, **kwargs) -> score_result.ScoreResult:
         context = kwargs.get("context", [])
         if not context:
-            return None
+            return score_result.ScoreResult(
+                name=self.name,
+                value=0.0,
+                reason="search_sec_filing not called — skipped",
+                scoring_failed=True,
+            )
         input_ = kwargs.get("input", "")
         return self._inner.score(input=input_, output=output, context=context)
