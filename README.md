@@ -83,6 +83,96 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 서버 실행 후 `http://localhost:8000/docs` 에서 API 문서를 확인할 수 있습니다.
 
+## 아키텍처 흐름
+
+### 질문 → 응답 전체 흐름
+
+```
+사용자 질문 (POST /api/v1/chat)
+│
+▼
+┌─────────────────────────────────────────────────────────┐
+│  chat.py (FastAPI Route)                                │
+│  AgentService.process_query()                           │
+│  → agent.astream(..., stream_mode="updates")            │
+└────────────────────────┬────────────────────────────────┘
+                         │  SSE 스트리밍
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  【메인 에이전트】 LangChain ReAct (create_agent)         │
+│                                                         │
+│  ┌─ model 스텝 ──────────────────────────────────────┐  │
+│  │  ChatOpenAI(GPT-4o) + system_prompt               │  │
+│  │  → 어떤 도구를 쓸지 결정                           │  │
+│  │  → tool_calls: [도구명, args]                     │  │
+│  └───────────────────────────────────────────────────┘  │
+│            │                                            │
+│            ▼  (도구가 ChatResponse면 → done 이벤트)     │
+│  ┌─ tools 스텝 ──────────────────────────────────────┐  │
+│  │  [일반 도구]                [서브 에이전트 도구]   │  │
+│  │  get_stock_price            search_sec_filing      │  │
+│  │  get_company_info     ────▶ (LangGraph로 위임)     │  │
+│  │  get_recent_news                                   │  │
+│  │  get_stock_history                                 │  │
+│  └───────────────────────────────────────────────────┘  │
+│            │                                            │
+│            └── 도구 결과를 messages에 추가 → 다시 model │
+└─────────────────────────────────────────────────────────┘
+                         │
+         search_sec_filing 호출 시
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  【서브 에이전트】 LangGraph StateGraph                   │
+│  (subagent-as-tool 패턴 — @tool로 래핑됨)               │
+│                                                         │
+│       START                                             │
+│       /    \        ← fan-out (병렬 실행)               │
+│      ▼      ▼                                           │
+│  bm25_    vector_                                       │
+│  search   search                                        │
+│  (ES      (OpenAI embed → ES kNN)                       │
+│  match)                                                 │
+│      \    /         ← fan-in (둘 다 완료 후 진입)       │
+│       ▼  ▼                                              │
+│  merge_results                                          │
+│  (_id 기준 중복 제거, 높은 score 채택)                  │
+│       │                                                 │
+│       ▼                                                 │
+│     rerank                                              │
+│  (seen_ids 제외 → ES Inference API / score 내림차순 fallback) │
+│  → 상위 5개 청크 추출 → result + seen_ids 반환          │
+│       │                                                 │
+│      END                                                │
+└─────────────────────────────────────────────────────────┘
+                         │
+             메인 에이전트 messages에 추가
+                         │
+                         ▼
+             ChatOpenAI → ChatResponse 도구 호출
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  SSE 이벤트 스트림 (클라이언트 수신)                     │
+│                                                         │
+│  {"step": "model",  "tool_calls": ["get_stock_price"]}  │
+│  {"step": "tools",  "name": "get_stock_price", ...}     │
+│  {"step": "model",  "tool_calls": ["ChatResponse"]}     │
+│  {"step": "done",   "message_id": "...", "content": "..."} │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 메인 에이전트 vs 서브 에이전트
+
+| 구분 | 메인 에이전트 | 서브 에이전트 |
+|---|---|---|
+| 프레임워크 | LangChain `create_agent()` | LangGraph `StateGraph` |
+| 흐름 제어 | LLM이 동적으로 도구 선택 (ReAct) | 개발자가 노드·엣지를 정적 정의 |
+| 병렬 실행 | 불가 | BM25 + kNN fan-out |
+| 연결 방식 | — | `@tool` 래핑 → 메인 에이전트 tools 목록에 등록 |
+| LLM 사용 | GPT-4o (질문 해석 + 최종 답변) | 없음 (검색·정렬 처리만) |
+| 대화 이력 | MemorySaver (`thread_id` 기반 전체 대화) | `_seen_ids_cache` (`thread_id:ticker` 기반 seen_ids만 보존) |
+
 ## API 엔드포인트
 
 | 메서드 | 경로 | 설명 |

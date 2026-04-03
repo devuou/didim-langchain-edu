@@ -121,16 +121,12 @@ def test_get_es_client_returns_singleton():
     assert c1 is c2
 
 
-def test_get_reranker_returns_none_without_cohere(monkeypatch):
-    """COHERE_API_KEY 없을 때 None 반환"""
+def test_rerank_hits_returns_none_without_inference_id(monkeypatch):
+    """ES_RERANKER_INFERENCE_ID 미설정 시 None 반환"""
     import app.agents.tools._rag_common as rag
-    rag._reranker = None
-    rag._reranker_initialized = False
-    monkeypatch.setattr(
-        "app.agents.tools._rag_common._get_cohere_api_key",
-        lambda: None,
-    )
-    result = rag.get_reranker()
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "ES_RERANKER_INFERENCE_ID", None)
+    result = rag.rerank_hits("test query", [{"_source": {"text": "hello"}}])
     assert result is None
 
 
@@ -150,7 +146,7 @@ def test_format_hits_returns_string():
 # ─── Task 6: sec_search_agent 노드 ────────────────────────────────────────────
 
 def test_sec_search_state_accepts_all_fields():
-    """SecSearchState TypedDict가 모든 필드를 허용하는지 확인"""
+    """SecSearchState TypedDict가 모든 필드(seen_ids 포함)를 허용하는지 확인"""
     from app.agents.sec_search_agent import SecSearchState
     state: SecSearchState = {
         "query": "사업 리스크",
@@ -159,8 +155,10 @@ def test_sec_search_state_accepts_all_fields():
         "vector_hits": [],
         "merged_hits": [],
         "result": "",
+        "seen_ids": ["AAPL_item1_0", "AAPL_item1a_0"],
     }
     assert state["ticker"] == "AAPL"
+    assert state["seen_ids"] == ["AAPL_item1_0", "AAPL_item1a_0"]
 
 
 def test_merge_results_deduplicates_by_id():
@@ -181,9 +179,9 @@ def test_merge_results_deduplicates_by_id():
 
 
 def test_rerank_sorts_by_score_without_reranker(monkeypatch):
-    """리랭커 없을 때 score 내림차순으로 정렬"""
+    """rerank_hits가 None 반환 시 score 내림차순으로 정렬"""
     import app.agents.sec_search_agent as module
-    monkeypatch.setattr(module, "_get_reranker", lambda: None)
+    monkeypatch.setattr(module, "rerank_hits", lambda query, hits: None)
     from app.agents.sec_search_agent import _rerank_fn
     state = {
         "merged_hits": [
@@ -207,16 +205,86 @@ def test_search_sec_filing_tool_is_callable():
 
 
 def test_search_sec_filing_invokes_graph(monkeypatch):
-    """search_sec_filing 호출 시 내부 그래프가 invoke되는지 확인"""
+    """search_sec_filing 호출 시 내부 그래프가 seen_ids와 함께 invoke되는지 확인"""
     from unittest.mock import MagicMock
     import app.agents.sec_search_agent as module
 
     mock_graph = MagicMock()
-    mock_graph.invoke.return_value = {"result": "Apple faces competition risks."}
+    mock_graph.invoke.return_value = {
+        "result": "Apple faces competition risks.",
+        "seen_ids": ["AAPL_item1_0"],
+    }
     monkeypatch.setattr(module, "_sec_search_graph", mock_graph)
+    # 캐시 초기화
+    module._seen_ids_cache.clear()
 
     result = module.search_sec_filing.invoke({"ticker": "AAPL", "query": "사업 리스크"})
     assert "Apple faces" in result
     mock_graph.invoke.assert_called_once_with(
-        {"ticker": "AAPL", "query": "사업 리스크"}
+        {"ticker": "AAPL", "query": "사업 리스크", "seen_ids": []}
     )
+
+
+def test_rerank_filters_seen_ids(monkeypatch):
+    """seen_ids에 포함된 청크는 결과에서 제외됨"""
+    import app.agents.sec_search_agent as module
+    monkeypatch.setattr(module, "rerank_hits", lambda query, hits: None)
+    from app.agents.sec_search_agent import _rerank_fn
+    state = {
+        "merged_hits": [
+            {"_id": "chunk_a", "_source": {"text": "already returned", "section": "item1", "ticker": "AAPL", "fiscal_year": "2024"}, "_score": 2.0},
+            {"_id": "chunk_b", "_source": {"text": "new content", "section": "item1a", "ticker": "AAPL", "fiscal_year": "2024"}, "_score": 1.5},
+        ],
+        "query": "test",
+        "seen_ids": ["chunk_a"],
+    }
+    result = _rerank_fn(state)
+    ids = [h["_id"] for h in result["merged_hits"]]
+    assert "chunk_a" not in ids
+    assert "chunk_b" in ids
+
+
+def test_rerank_falls_back_when_all_seen(monkeypatch):
+    """모든 청크가 seen_ids에 포함된 경우 필터 없이 전체 반환"""
+    import app.agents.sec_search_agent as module
+    monkeypatch.setattr(module, "rerank_hits", lambda query, hits: None)
+    from app.agents.sec_search_agent import _rerank_fn
+    state = {
+        "merged_hits": [
+            {"_id": "chunk_a", "_source": {"text": "only chunk", "section": "item1", "ticker": "AAPL", "fiscal_year": "2024"}, "_score": 1.0},
+        ],
+        "query": "test",
+        "seen_ids": ["chunk_a"],
+    }
+    result = _rerank_fn(state)
+    # fallback: 전체 hits 반환 (중복이라도 빈 결과보다 낫다)
+    assert len(result["merged_hits"]) == 1
+    assert result["merged_hits"][0]["_id"] == "chunk_a"
+
+
+def test_search_sec_filing_accumulates_seen_ids(monkeypatch):
+    """두 번째 호출 시 첫 번째에서 반환된 seen_ids가 전달됨"""
+    from unittest.mock import MagicMock
+    import app.agents.sec_search_agent as module
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.side_effect = [
+        {"result": "first result", "seen_ids": ["chunk_a", "chunk_b"]},
+        {"result": "second result", "seen_ids": ["chunk_a", "chunk_b", "chunk_c"]},
+    ]
+    monkeypatch.setattr(module, "_sec_search_graph", mock_graph)
+    module._seen_ids_cache.clear()
+
+    # 첫 번째 호출 — thread_id와 함께 config 전달
+    module.search_sec_filing.invoke(
+        {"ticker": "AAPL", "query": "리스크"},
+        config={"configurable": {"thread_id": "test-thread-1"}}
+    )
+    # 두 번째 호출 — 첫 번째의 seen_ids가 전달돼야 함
+    module.search_sec_filing.invoke(
+        {"ticker": "AAPL", "query": "리스크"},
+        config={"configurable": {"thread_id": "test-thread-1"}}
+    )
+
+    second_call_args = mock_graph.invoke.call_args_list[1][0][0]
+    assert second_call_args["seen_ids"] == ["chunk_a", "chunk_b"]

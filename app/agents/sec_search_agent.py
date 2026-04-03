@@ -18,9 +18,12 @@ agent-sample의 search_agent.py 패턴을 따른다.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
-from langchain_core.tools import tool
+from langchain_core.tools import tool, InjectedToolArg
+from langchain_core.runnables import RunnableConfig
 
 from app.agents.tools._rag_common import (
     get_es_client,
@@ -44,6 +47,7 @@ class SecSearchState(TypedDict):
     vector_hits: list[dict]  # kNN 벡터 검색 결과
     merged_hits: list[dict]  # 병합 + 중복 제거된 결과
     result: str              # 최종 포맷팅 문자열 (LLM 컨텍스트용)
+    seen_ids: list[str]      # 이미 반환된 chunk ID 목록 (cross-invocation 중복 제거용)
 
 
 # ES 인덱스 이름: ingest_10k.py의 build_index_name()과 동일 규칙으로 생성
@@ -121,22 +125,27 @@ def merge_results(state: SecSearchState) -> dict:
 def _rerank_fn(state: dict) -> dict:
     """ES Inference API로 리랭킹한다. 실패 시 score 내림차순 정렬로 fallback한다.
 
-    ES_RERANKER_INFERENCE_ID가 설정된 경우 ES 호스팅 rerank 모델을 호출한다.
-    설정이 없거나 호출에 실패하면 기존 ES score 기준으로 내림차순 정렬한다.
+    seen_ids에 포함된 청크를 먼저 제외한 뒤 리랭킹한다.
+    모든 청크가 seen_ids에 포함된 경우(전량 소진) 필터 없이 전체 후보를 사용한다.
+    선택된 청크 ID는 seen_ids에 누적되어 반환된다.
     """
     hits = state.get("merged_hits", [])
+    seen_ids = set(state.get("seen_ids", []))
     query = state.get("query", "")
 
-    reranked = rerank_hits(query, hits)
-    if reranked is None:
-        # fallback: ES score 기준 내림차순 정렬
-        hits = sorted(hits, key=lambda h: h["_score"], reverse=True)
-    else:
-        hits = reranked
+    # 이미 반환된 청크 제외 — 모두 소진된 경우 전체 사용(fallback)
+    unseen = [h for h in hits if h["_id"] not in seen_ids]
+    candidates = unseen if unseen else hits
 
-    # 상위 N개만 LLM에 전달 (컨텍스트 길이 제한)
-    top_hits = hits[:_FINAL_TOP_N]
-    return {"merged_hits": top_hits, "result": format_hits(top_hits)}
+    reranked = rerank_hits(query, candidates)
+    if reranked is None:
+        candidates = sorted(candidates, key=lambda h: h["_score"], reverse=True)
+    else:
+        candidates = reranked
+
+    top_hits = candidates[:_FINAL_TOP_N]
+    new_seen_ids = list(seen_ids) + [h["_id"] for h in top_hits]
+    return {"merged_hits": top_hits, "result": format_hits(top_hits), "seen_ids": new_seen_ids}
 
 
 def rerank(state: SecSearchState) -> dict:
@@ -176,11 +185,19 @@ def _build_graph():
 # 모듈 로드 시 그래프를 1회 컴파일 — 이후 search_sec_filing 호출마다 재사용
 _sec_search_graph = _build_graph()
 
+# thread_id + ticker 조합별로 반환된 chunk ID를 누적 저장
+# key: "{thread_id}:{ticker_upper}", value: seen chunk ID 목록
+_seen_ids_cache: dict[str, list[str]] = {}
+
 
 # ─── @tool 래핑 ───────────────────────────────────────────────────────────────
 
 @tool
-def search_sec_filing(ticker: str, query: str) -> str:
+def search_sec_filing(
+    ticker: str,
+    query: str,
+    config: Annotated[RunnableConfig, InjectedToolArg] = None,
+) -> str:
     """기업 공시(10-K 사업보고서)에서 질문과 관련된 내용을 검색합니다.
     사업 구조, 리스크 요인, 경영 성과 분석(MD&A) 등 정성적 정보 조회에 사용합니다.
     지원 종목: AAPL, MSFT, TSLA, NVDA (이외 종목 불가)
@@ -188,6 +205,24 @@ def search_sec_filing(ticker: str, query: str) -> str:
 
     subagent-as-tool 패턴:
     StateGraph 전체를 @tool로 래핑하면 메인 에이전트 입장에서 일반 도구와 동일하게 사용된다.
+    thread_id 기반 seen_ids 캐시로 cross-invocation 중복 청크를 제거한다.
     """
-    result = _sec_search_graph.invoke({"ticker": ticker.upper(), "query": query})
+    ticker_upper = ticker.upper()
+
+    # thread_id 추출 — None일 경우 캐시 비활성화
+    thread_id = (config or {}).get("configurable", {}).get("thread_id")
+    cache_key = f"{thread_id}:{ticker_upper}" if thread_id else None
+
+    seen_ids = _seen_ids_cache.get(cache_key, []) if cache_key else []
+
+    result = _sec_search_graph.invoke({
+        "ticker": ticker_upper,
+        "query": query,
+        "seen_ids": seen_ids,
+    })
+
+    # 반환된 seen_ids를 캐시에 저장 (다음 호출에서 사용)
+    if cache_key:
+        _seen_ids_cache[cache_key] = result.get("seen_ids", seen_ids)
+
     return result["result"]
