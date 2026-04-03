@@ -167,41 +167,46 @@ L2 개선 원인: Cohere Rerank 적용(리랭킹 정상화) + SEC 데이터셋 6
 
 ## 4. 주요 트러블슈팅
 
-### 1. SEC 10-K 섹션 추출이 목차에서 조기 종료
-`re.search()` → 목차 첫 매칭에서 멈춤. `re.finditer()`로 전체 매칭 후 **마지막**(= 본문) 사용.
+### yfinance 뉴스 무관 기사 혼입
 
-### 2. stop 패턴이 교차 참조에 매칭
-`Item 8` 교차 참조가 stop 패턴에 걸려 섹션 227자에서 잘림. 실제 헤더는 `Item 8.` 형식 → 패턴에 마침표 추가로 구분.
+**근본 원인**: yfinance `stock.news`는 티커를 직접 매핑하지 않고 **섹터·키워드 기반**으로 뉴스를 집계한다. TSLA 조회 시 Lucid(경쟁사)·Anthropic 기사가 혼입되는 것은 라이브러리 내부 문제로, 코드 레벨에서 완전히 제거할 수 없다.
 
-### 3. GEval이 `expected_output` 무시
-`GEval.score(output, **ignored_kwargs)` — 추가 인자 전부 버려짐. 페이로드 패킹으로 우회:
-```python
-payload = f"QUESTION: {input}\nEXPECTED_OUTPUT: {expected_output}\nOUTPUT: {output}"
-```
-→ task_completion 0.55 → 0.61, 0점 항목 0건.
+**개선 과정**
 
-### 4. JSON 인젝션 (SSE 스트림 파괴)
-tool 결과의 `"`, `}` 포함 시 SSE JSON 파괴. `json.dumps(message.content, ensure_ascii=False)` 적용.
-
-### 5. yfinance 뉴스 무관 기사 혼입
-yfinance가 섹터·키워드 기반으로 뉴스를 집계 → 티커와 무관한 경쟁사 기사 혼입. 개선 과정:
-
-| 단계 | 변경 내용 | 문제 |
+| 단계 | 변경 내용 | 잔존 문제 |
 |---|---|---|
 | 초기 | 3건 조회 → LLM 필터 | 반환 건수 불안정 |
 | 1차 | 30건 조회 → 도구 레벨 키워드 필터 | `"EV" in "seven"` 오탐 |
-| 2차 | `\b` 단어 경계 regex 적용 | `_is_recent` 날짜 필터 무력화 |
-| 3차 | `content.pubDate` 필드로 수정 | ✅ 현재 안정 |
+| 2차 | `\b` 단어 경계 regex 적용 | `_is_recent` 날짜 필터 항상 통과 |
+| 3차 | `content.pubDate` 필드로 수정 | 아래 문제 참고 |
 
-근본 원인(yfinance 섹터 집계)은 라이브러리 내부 문제 → 완전 해결 불가.
+**`content.pubDate` 수정 후에도 남아있는 문제**
+
+```python
+def _is_recent(article: dict, cutoff: datetime) -> bool:
+    pub_str = article.get("content", {}).get("pubDate")
+    if not pub_str:
+        return True  # ← pubDate 없으면 날짜 무관하게 통과
+```
+
+- `pubDate`가 없는 기사(구형 API 응답 구조, 일부 제공사)는 날짜 필터를 **무조건 통과**한다 — 30일이 넘은 오래된 기사도 혼입될 수 있다
+- yfinance는 공식 API가 아니라 Yahoo Finance 비공식 스크래핑 기반이므로 **응답 구조가 라이브러리 버전마다 바뀔 수 있다** — `content.pubDate` 경로도 언제든 깨질 수 있고, 깨지면 또 전량 통과
+- 키워드 필터 후 관련 기사가 0건이면 "없음" 반환 (fallback 없음) — 등록되지 않은 종목이나 키워드 범위 밖 기사는 아예 반환되지 않아 **사용자 입장에서 뉴스가 없는 것처럼 보일 수 있다**
 
 ---
 
 ## 5. 미해결 이슈
 
-| 이슈 | 현상 | 개선 방향 |
+### Hallucination 메트릭이 실시간 데이터 에이전트에 근본적으로 부적합
+
+`Hallucination` 메트릭은 원래 RAG 시스템에서 "제공된 context에 없는 내용을 지어냈는가"를 판단하도록 설계되어 있다. judge LLM 입장에서는 에이전트가 어떤 도구를 호출했는지, 그 결과가 무엇인지 알 수 없다. 때문에 도구로 정확하게 조회한 수치도 "근거 없는 환각"으로 오판한다.
+
+| 질문 | judge 판단 | 실제 |
 |---|---|---|
-| Hallucination 메트릭 실시간 데이터 오탐 | yfinance 수치를 환각으로 오판 | yfinance tool output도 context로 캡처 |
+| NVDA 현재 주가 | "출처·타임스탬프 없어 검증 불가" → 높은 점수 | yfinance 실시간 조회 정확 데이터 |
+| NVDA 7일 히스토리 | "2026년 3월 $180대는 말이 안 됨" → 높은 점수 | ES 저장 정확 데이터 |
+
+SEC 공시 데이터는 `SecGroundedness`로 해결했지만(tool output을 context로 캡처), **yfinance 실시간 도구도 동일하게 context 캡처 구조를 적용해야** 근본 해결이 가능하다. 현재는 미구현 상태로, L2 hallucination 점수(0.360)에는 이 오탐이 포함되어 있어 실제 환각보다 수치가 높게 나타난다.
 
 ---
 
